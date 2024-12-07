@@ -1,23 +1,10 @@
+import os
 import gradio as gr
-import json
 from datetime import datetime
-from typing import List, Dict
-import random
-from langchain_groq import ChatGroq
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableSequence
-from langchain.memory import ConversationBufferWindowMemory
-import os
 from dotenv import load_dotenv
-from typing import List, Dict, Optional
-from datetime import datetime
-import random
-import os
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
+from typing import List, Dict, Optional
 from langchain.memory import ConversationBufferWindowMemory
-from langchain_core.tools import tool
 
 # Load environment variables
 load_dotenv()
