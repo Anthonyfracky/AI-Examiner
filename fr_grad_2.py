@@ -9,6 +9,15 @@ from langchain_core.runnables import RunnableSequence
 from langchain.memory import ConversationBufferWindowMemory
 import os
 from dotenv import load_dotenv
+from typing import List, Dict, Optional
+from datetime import datetime
+import random
+import os
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
+from langchain.memory import ConversationBufferWindowMemory
+from langchain_core.tools import tool
 
 # Load environment variables
 load_dotenv()
@@ -29,119 +38,127 @@ def load_themes(file_path: str = "themes.txt") -> List[str]:
 
 class AIExaminer:
     def __init__(self):
-        self.student_info = {"name": "", "email": ""}
-        self.chat_history = []
-        self.current_themes = []
-        self.current_theme_index = 0
-        self.examination_started = False
-
-        # Initialize Groq language model
+        # Ініціалізація LLM з нижчою температурою для більш детермінованої поведінки
         self.llm = ChatGroq(
             api_key=os.getenv("GROQ_API_KEY"),
             model_name="llama3-groq-70b-8192-tool-use-preview",
-            temperature=0.7,
+            temperature=0.3,  # Знижена температура
             max_tokens=4096
         )
 
-        # Initialize conversation memory
-        self.memory = ConversationBufferWindowMemory(
-            k=10,
-            memory_key="chat_history",
-            return_messages=True
-        )
+        # Ініціалізація стану екзамену
+        self.exam_state = {
+            "started": False,
+            "name": None,
+            "email": None,
+            "current_questions": [],
+            "current_question_index": 0,
+            "scores": []
+        }
 
-        # Create examination chain
-        self.exam_chain = self._create_exam_chain()
-
-    def _create_exam_chain(self):
-        """Create a LangChain chain for examination."""
-        template = """Ти є екзаменатором з курсу Natural Language Processing.
-        Поточна тема для обговорення: {theme}
-
-        Правила проведення іспиту:
-        1. Задавай уточнюючі питання якщо відповідь студента неповна
-        2. Оцінюй глибину розуміння теми
-        3. Якщо студент не може відповісти або відповідає некоректно, переходь до наступної теми
-        4. В кінці кожної теми став оцінку від 0 до 10 за відповідь
-
-        Історія бесіди:
-        {chat_history}
-
-        Відповідь студента: {student_input}
-
-        Твоя відповідь має бути в контексті іспиту."""
-
-        prompt = ChatPromptTemplate.from_template(template)
-        chain = prompt | self.llm
-
-        return chain
-
-    async def process_message(self, message: str, history: List[List[str]]) -> tuple:
-        """Process incoming messages and maintain conversation state."""
-        if not self.student_info["name"]:
-            self.student_info["name"] = message
-            return self._format_message("assistant", "Дякую! Тепер введіть ваш email:"), history
-
-        if not self.student_info["email"]:
-            self.student_info["email"] = message
-            self.current_themes = self.start_exam(self.student_info["email"], self.student_info["name"])
-            self.examination_started = True
-            return self._format_message("assistant",
-                                        f"Починаємо іспит.\n\nПерше питання: {self.current_themes[0]}"), history
-
-        if self.examination_started:
-            try:
-                # Process examination dialogue
-                chat_history = self.memory.load_memory_variables({})["chat_history"]
-                response = await self.exam_chain.ainvoke({
-                    "theme": self.current_themes[self.current_theme_index],
-                    "student_input": message,
-                    "chat_history": chat_history
-                })
-
-                # Update memory
-                self.memory.save_context({"input": message}, {"output": response.content})
-
-                # Check if we need to move to next theme
-                if "оцінка:" in response.content.lower() or "оцінка :" in response.content.lower():
-                    self.current_theme_index += 1
-                    if self.current_theme_index < len(self.current_themes):
-                        response.content += f"\n\nНаступна тема: {self.current_themes[self.current_theme_index]}"
-                    else:
-                        # Get final evaluation
-                        final_template = """На основі всієї бесіди, надай фінальну оцінку студенту.
-
-                        Формат оцінки:
-                        1. Загальна оцінка (0-10)
-                        2. Сильні сторони
-                        3. Області для покращення
-
-                        Історія бесіди:
-                        {chat_history}"""
-
-                        final_prompt = ChatPromptTemplate.from_template(final_template)
-                        final_chain = final_prompt | self.llm
-                        final_response = await final_chain.ainvoke({
-                            "chat_history": chat_history
-                        })
-                        response.content += "\n\nІспит завершено!\n" + final_response.content
-                        self.examination_started = False
-
-                return self._format_message("assistant", response.content), history
-
-            except Exception as e:
-                error_message = f"Помилка при обробці повідомлення: {str(e)}"
-                return self._format_message("assistant", error_message), history
-
-        return self._format_message("assistant", "Іспит завершено. Дякуємо за участь!"), history
+        self.memory = ConversationBufferWindowMemory(k=10)
 
     def start_exam(self, email: str, name: str) -> List[str]:
-        """Start the examination process."""
-        themes = load_themes()
-        return random.sample(themes, min(3, len(themes)))
+        """Розпочати екзамен"""
+        questions = [
+            "Поясніть архітектуру моделей Transformer",
+            "Що таке механізм уваги (attention) і як він працює?",
+            "Опишіть процес токенізації в NLP",
+            "Що таке embeddings і як вони використовуються в NLP?",
+            "Поясніть концепцію fine-tuning у мовних моделях"
+        ]
+
+        self.exam_state["started"] = True
+        self.exam_state["name"] = name
+        self.exam_state["email"] = email
+        self.exam_state["current_questions"] = questions
+        self.exam_state["current_question_index"] = 0
+
+        return questions
+
+    def end_exam(self):
+        """Завершити екзамен"""
+        average_score = sum(self.exam_state["scores"]) / len(self.exam_state["scores"]) if self.exam_state[
+            "scores"] else 0
+
+        result = {
+            "name": self.exam_state["name"],
+            "email": self.exam_state["email"],
+            "score": round(average_score, 2),
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # Скидання стану екзамену
+        self.exam_state = {
+            "started": False,
+            "name": None,
+            "email": None,
+            "current_questions": [],
+            "current_question_index": 0,
+            "scores": []
+        }
+
+        return result
+
+    async def process_message(self, message: str, history: List[List[str]]) -> tuple:
+        # Якщо екзамен не розпочато
+        if not self.exam_state["started"]:
+            # Перевірка чи є повне ім'я та email
+            parts = message.split()
+            if len(parts) >= 2 and '@' in message:
+                name = ' '.join(parts[:-1])
+                email = parts[-1]
+
+                # Розпочати екзамен
+                questions = self.start_exam(email, name)
+                response = f"Вітаю, {name}! Ми розпочинаємо іспит з NLP.\n\n"
+                response += f"Перше питання: {questions[0]}"
+
+                return self._format_message("assistant", response), history
+            else:
+                # Запит на ім'я та email
+                return self._format_message("assistant",
+                                            "Будь ласка, введіть ваше повне ім'я та email (наприклад: Іван Петров ivan@example.com)"), history
+
+        # Якщо питання ще є
+        if self.exam_state["current_question_index"] < len(self.exam_state["current_questions"]):
+            # Оцінювання відповіді на поточне питання
+            current_question = self.exam_state["current_questions"][self.exam_state["current_question_index"]]
+
+            # Простий механізм оцінювання (можна замінити на більш складний)
+            score = self._evaluate_answer(message, current_question)
+            self.exam_state["scores"].append(score)
+
+            # Перехід до наступного питання
+            self.exam_state["current_question_index"] += 1
+
+            # Якщо питання закінчилися
+            if self.exam_state["current_question_index"] >= len(self.exam_state["current_questions"]):
+                result = self.end_exam()
+                response = f"Іспит завершено! Ваш бал: {result['score']}/10"
+                return self._format_message("assistant", response), history
+
+            # Наступне питання
+            next_question = self.exam_state["current_questions"][self.exam_state["current_question_index"]]
+            response = f"Оцінка за попереднє питання: {score}/10\n\n"
+            response += f"Наступне питання: {next_question}"
+
+            return self._format_message("assistant", response), history
+
+    def _evaluate_answer(self, answer: str, question: str) -> float:
+        """Базова функція оцінювання відповіді"""
+        # Тимчасова проста логіка оцінювання
+        if len(answer.split()) < 5:
+            return 2.0
+        elif len(answer.split()) < 10:
+            return 5.0
+        elif len(answer.split()) < 20:
+            return 7.0
+        else:
+            return 9.0
 
     def _format_message(self, role: str, content: str) -> Dict:
-        """Format a message with timestamp."""
+        """Форматування повідомлення"""
         return {
             "role": role,
             "content": content,
