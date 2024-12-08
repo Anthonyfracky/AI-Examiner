@@ -1,33 +1,18 @@
+import logging
 import gradio as gr
 import json
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 import random
-from langchain_groq import ChatGroq
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableSequence
-from langchain.memory import ConversationBufferWindowMemory
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
-from typing import List, Dict, Optional
-from datetime import datetime
-import random
-import os
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_groq import ChatGroq
-from langchain.memory import ConversationBufferWindowMemory
-from langchain_core.tools import tool
 
 # Load environment variables
 load_dotenv()
 
-# Check for Groq API key
-if not os.getenv("GROQ_API_KEY"):
-    raise ValueError("Groq API key not found! Please set GROQ_API_KEY environment variable.")
 
-
-def load_themes(file_path: str = "themes.txt") -> List[str]:
+def load_questions(file_path: str = "themes.txt") -> List[str]:
     """Load examination themes from a text file."""
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
@@ -38,132 +23,176 @@ def load_themes(file_path: str = "themes.txt") -> List[str]:
 
 class AIExaminer:
     def __init__(self):
-        # Ініціалізація LLM з нижчою температурою для більш детермінованої поведінки
-        self.llm = ChatGroq(
-            api_key=os.getenv("GROQ_API_KEY"),
-            model_name="llama3-groq-70b-8192-tool-use-preview",
-            temperature=0.3,  # Знижена температура
-            max_tokens=4096
+        self.client = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url="https://api.groq.com/openai/v1"  # Replace with actual Grok API URL
         )
+        self.conversation_history = []
+        self.examination_active = False
+        self.current_email = None
+        self.current_name = None
+        self.questions = load_questions()
 
-        # Ініціалізація стану екзамену
-        self.exam_state = {
-            "started": False,
-            "name": None,
-            "email": None,
-            "current_questions": [],
-            "current_question_index": 0,
-            "scores": []
-        }
-
-        self.memory = ConversationBufferWindowMemory(k=10)
-
-    def start_exam(self, email: str, name: str) -> List[str]:
-        """Розпочати екзамен"""
-        questions = [
-            "Поясніть архітектуру моделей Transformer",
-            "Що таке механізм уваги (attention) і як він працює?",
-            "Опишіть процес токенізації в NLP",
-            "Що таке embeddings і як вони використовуються в NLP?",
-            "Поясніть концепцію fine-tuning у мовних моделях"
+        self.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "start_exam",
+                    "description": "Start a new examination session for a student",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "email": {
+                                "type": "string",
+                                "description": "Student's email address"
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Student's full name"
+                            }
+                        },
+                        "required": ["email", "name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "end_exam",
+                    "description": "End the examination session and record the results",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "email": {
+                                "type": "string",
+                                "description": "Student's email address"
+                            },
+                            "score": {
+                                "type": "number",
+                                "description": "Final score (0-100)"
+                            },
+                            "history": {
+                                "type": "array",
+                                "description": "List of conversation messages",
+                                "items": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "required": ["email", "score", "history"]
+                    }
+                }
+            }
         ]
 
-        self.exam_state["started"] = True
-        self.exam_state["name"] = name
-        self.exam_state["email"] = email
-        self.exam_state["current_questions"] = questions
-        self.exam_state["current_question_index"] = 0
+    def start_exam(self, email: str, name: str) -> List[str]:
+        """Start a new examination session for a student."""
+        self.examination_active = True
+        self.current_email = email
+        self.current_name = name
+        return random.sample(self.questions, 5)
 
-        return questions
+    def end_exam(self, email: str, score: float, history: List[dict]) -> dict:
+        """End the examination session and record the results."""
+        if not self.examination_active:
+            return {"error": "No active examination session"}
 
-    def end_exam(self):
-        """Завершити екзамен"""
-        average_score = sum(self.exam_state["scores"]) / len(self.exam_state["scores"]) if self.exam_state[
-            "scores"] else 0
+        if email != self.current_email:
+            return {"error": "Email mismatch with current session"}
 
-        result = {
-            "name": self.exam_state["name"],
-            "email": self.exam_state["email"],
-            "score": round(average_score, 2),
-            "timestamp": datetime.now().isoformat()
+        summary = {
+            "student_name": self.current_name,
+            "student_email": email,
+            "score": score,
+            "timestamp": datetime.now().isoformat(),
+            "conversation_history": history
         }
 
-        # Скидання стану екзамену
-        self.exam_state = {
-            "started": False,
-            "name": None,
-            "email": None,
-            "current_questions": [],
-            "current_question_index": 0,
-            "scores": []
-        }
+        self.examination_active = False
+        self.current_email = None
+        self.current_name = None
 
-        return result
+        return summary
 
-    async def process_message(self, message: str, history: List[List[str]]) -> tuple:
-        # Якщо екзамен не розпочато
-        if not self.exam_state["started"]:
-            # Перевірка чи є повне ім'я та email
-            parts = message.split()
-            if len(parts) >= 2 and '@' in message:
-                name = ' '.join(parts[:-1])
-                email = parts[-1]
+    def process_message(self, message, chat_history):
+        """Process a new message using the OpenAI API and update chat history."""
+        # Convert chat history to OpenAI format
+        messages = [
+            {
+                "role": "system",
+                "content": """You are an AI examiner for a Natural Language Processing course. 
+    Your role is to conduct oral examinations and evaluate students' knowledge.
 
-                # Розпочати екзамен
-                questions = self.start_exam(email, name)
-                response = f"Вітаю, {name}! Ми розпочинаємо іспит з NLP.\n\n"
-                response += f"Перше питання: {questions[0]}"
+    Follow these guidelines:
+    1. When a student provides their email and name, use the start_exam tool to begin the examination
+    2. Ask one question at a time and wait for the student's response
+    3. Evaluate each answer thoroughly and provide feedback
+    4. After all questions are answered, calculate a final score (0-100)
+    5. Use the end_exam tool when the examination is complete
+    Remember to:
+    - Be professional and supportive
+    - Give clear feedback after each answer
+    - Maintain examination integrity
+    - Use appropriate academic language"""
+            }
+        ]
 
-                return self._format_message("assistant", response), history
-            else:
-                # Запит на ім'я та email
-                return self._format_message("assistant",
-                                            "Будь ласка, введіть ваше повне ім'я та email (наприклад: Іван Петров ivan@example.com)"), history
+        # Add chat history
+        for human_msg, assistant_msg in chat_history:
+            messages.extend([
+                {"role": "user", "content": human_msg},
+                {"role": "assistant", "content": assistant_msg}
+            ])
 
-        # Якщо питання ще є
-        if self.exam_state["current_question_index"] < len(self.exam_state["current_questions"]):
-            # Оцінювання відповіді на поточне питання
-            current_question = self.exam_state["current_questions"][self.exam_state["current_question_index"]]
+        # Add current message
+        messages.append({"role": "user", "content": message})
 
-            # Простий механізм оцінювання (можна замінити на більш складний)
-            score = self._evaluate_answer(message, current_question)
-            self.exam_state["scores"].append(score)
+        # Get response from OpenAI
+        response = self.client.chat.completions.create(
+            model="llama3-groq-70b-8192-tool-use-preview",
+            messages=messages,
+            tools=self.tools,
+            tool_choice="auto"
+        )
 
-            # Перехід до наступного питання
-            self.exam_state["current_question_index"] += 1
+        # Handle tool calls if present
+        if response.choices[0].message.tool_calls:
+            # First append the assistant's message that contains the tool calls
+            messages.append({
+                "role": "assistant",
+                "content": response.choices[0].message.content,
+                "tool_calls": response.choices[0].message.tool_calls
+            })
 
-            # Якщо питання закінчилися
-            if self.exam_state["current_question_index"] >= len(self.exam_state["current_questions"]):
-                result = self.end_exam()
-                response = f"Іспит завершено! Ваш бал: {result['score']}/10"
-                return self._format_message("assistant", response), history
+            for tool_call in response.choices[0].message.tool_calls:
+                if tool_call.function.name == 'start_exam':
+                    args = json.loads(tool_call.function.arguments)
+                    result = self.start_exam(args['email'], args['name'])
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_call.function.name,
+                        "content": str(result)
+                    })
+                elif tool_call.function.name == 'end_exam':
+                    args = json.loads(tool_call.function.arguments)
+                    result = self.end_exam(args['email'], args['score'], args['history'])
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_call.function.name,
+                        "content": str(result)
+                    })
 
-            # Наступне питання
-            next_question = self.exam_state["current_questions"][self.exam_state["current_question_index"]]
-            response = f"Оцінка за попереднє питання: {score}/10\n\n"
-            response += f"Наступне питання: {next_question}"
-
-            return self._format_message("assistant", response), history
-
-    def _evaluate_answer(self, answer: str, question: str) -> float:
-        """Базова функція оцінювання відповіді"""
-        # Тимчасова проста логіка оцінювання
-        if len(answer.split()) < 5:
-            return 2.0
-        elif len(answer.split()) < 10:
-            return 5.0
-        elif len(answer.split()) < 20:
-            return 7.0
-        else:
-            return 9.0
-
-    def _format_message(self, role: str, content: str) -> Dict:
-        """Форматування повідомлення"""
-        return {
-            "role": role,
-            "content": content,
-            "time": datetime.now().strftime("%H:%M")
-        }
+            # Get final response after tool use
+            response = self.client.chat.completions.create(
+                model="llama3-groq-70b-8192-tool-use-preview",
+                messages=messages,
+                tools=self.tools,
+                tool_choice="auto"
+            )
+        print(messages)
+        return [{"content": response.choices[0].message.content}]
 
 
 def create_interface() -> gr.Blocks:
@@ -186,7 +215,7 @@ def create_interface() -> gr.Blocks:
         )
 
         async def respond(message, chat_history):
-            bot_message = await examiner.process_message(message, chat_history)
+            bot_message = examiner.process_message(message, chat_history)
             chat_history.append((message, bot_message[0]["content"]))
             return "", chat_history
 
