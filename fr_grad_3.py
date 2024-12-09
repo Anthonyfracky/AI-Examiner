@@ -102,117 +102,147 @@ class AIExaminer:
         self.session_id = datetime.now().strftime("%Y%m%d%H%M%S")
         return self.questions_for_session
 
-    def end_exam(self, email: str, score: float, history: List[dict]) -> dict:
+    def end_exam(self, email: str, score: float, history: List[Dict]) -> Dict:
         """
-        End the examination session and record the results.
-        Saves the exam results to a JSON file with the session details.
+        End the examination session and record the results with robust history processing.
+
+        Args:
+            email (str): Student's email address
+            score (float): Final exam score
+            history (List[Dict]): Conversation history
+
+        Returns:
+            Dict: Exam session summary
         """
-        # Додаємо логування
-        logging.basicConfig(filename='exam_debug.log', level=logging.DEBUG,
-                            format='%(asctime)s - %(levelname)s - %(message)s')
+        # Налаштування базового логування
+        logging.basicConfig(
+            filename='exam_debug.log',
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
 
-        logging.debug(f"Received history type: {type(history)}")
-        logging.debug(f"Received history content: {history}")
-
+        # Перевірка активності іспиту
         if not self.examination_active:
+            logging.warning("Attempt to end non-active examination")
             return {"error": "No active examination session"}
 
+        # Перевірка відповідності email
         if email != self.current_email:
+            logging.error(f"Email mismatch: {email} vs {self.current_email}")
             return {"error": "Email mismatch with current session"}
 
-        # Розширена діагностика
-        formatted_history = []
-        current_time = datetime.now().isoformat()
+        # Уніфікована функція обробки історії
+        def standardize_history(raw_history):
+            """
+            Перетворює різні формати історії чату на уніфікований формат.
 
-        try:
-            # Спроба максимально широкої обробки
-            if isinstance(history, list):
-                for item in history:
-                    logging.debug(f"Processing item type: {type(item)}, content: {item}")
+            Args:
+                raw_history (List[Any]): Вхідна історія чату
 
-                    # Перевірка на tuple (характерно для Gradio)
+            Returns:
+                List[Dict]: Стандартизована історія
+            """
+            standardized_history = []
+            current_time = datetime.now().isoformat()
+
+            try:
+                for item in raw_history:
+                    # Обробка кортежів (характерно для Gradio)
                     if isinstance(item, tuple) and len(item) == 2:
                         user_msg, assistant_msg = item
-                        formatted_history.extend([
+                        standardized_history.extend([
                             {
                                 "role": "user",
                                 "content": str(user_msg),
-                                "datetime": current_time
+                                "timestamp": current_time
                             },
                             {
                                 "role": "assistant",
                                 "content": str(assistant_msg),
-                                "datetime": current_time
+                                "timestamp": current_time
                             }
                         ])
-                    # Перевірка на словник
+
+                    # Обробка словників
                     elif isinstance(item, dict):
+                        # Перевірка наявності контенту
                         if item.get('content'):
-                            formatted_history.append({
+                            standardized_history.append({
                                 "role": item.get('role', 'unknown'),
                                 "content": str(item.get('content', '')),
-                                "datetime": current_time
+                                "timestamp": current_time
                             })
-                    # Перевірка на список словників
+
+                    # Обробка списків словників
                     elif isinstance(item, list):
                         for subitem in item:
                             if isinstance(subitem, dict) and subitem.get('content'):
-                                formatted_history.append({
+                                standardized_history.append({
                                     "role": subitem.get('role', 'unknown'),
                                     "content": str(subitem.get('content', '')),
-                                    "datetime": current_time
+                                    "timestamp": current_time
                                 })
 
-            # Додаткова діагностика
-            logging.debug(f"Formatted history length: {len(formatted_history)}")
-            logging.debug(f"Formatted history content: {formatted_history}")
+            except Exception as e:
+                logging.error(f"Error in standardizing history: {e}", exc_info=True)
+                standardized_history = [{
+                    "role": "system",
+                    "content": f"Error processing conversation: {str(e)}",
+                    "timestamp": current_time
+                }]
+
+            return standardized_history
+
+        # Обробка історії
+        try:
+            formatted_history = standardize_history(history)
+
+            logging.debug(f"Processed history length: {len(formatted_history)}")
+
+            # Додавання системного запису, якщо історія порожня
+            if not formatted_history:
+                logging.warning("No conversation history available")
+                formatted_history = [{
+                    "role": "system",
+                    "content": "No conversation history captured",
+                    "timestamp": datetime.now().isoformat()
+                }]
 
         except Exception as e:
-            logging.error(f"Error processing history: {e}", exc_info=True)
+            logging.error(f"Unexpected error processing history: {e}", exc_info=True)
             formatted_history = [{
                 "role": "system",
-                "content": f"Error processing conversation: {str(e)}",
-                "datetime": current_time
+                "content": f"Critical error in history processing: {str(e)}",
+                "timestamp": datetime.now().isoformat()
             }]
 
-        # Якщо історія порожня, додаємо системне повідомлення
-        if not formatted_history:
-            logging.warning("No conversation history available")
-            formatted_history = [{
-                "role": "system",
-                "content": "No conversation history captured",
-                "datetime": current_time
-            }]
-
-        # Create a summary dictionary
+        # Формування підсумкового словника
         summary = {
-            "session_id": self.session_id,
-            "student_name": self.current_name,
+            "session_id": self.session_id or datetime.now().strftime("%Y%m%d%H%M%S"),
+            "student_name": self.current_name or "Unknown",
             "student_email": email,
-            "score": score,
-            "timestamp": current_time,
+            "score": max(0, min(score, 10)),  # ОбмеженняScore від 0 до 10
+            "timestamp": datetime.now().isoformat(),
             "conversation_history": formatted_history
         }
 
-        # Ensure results directory exists
+        # Забезпечення існування директорії для результатів
         os.makedirs("exam_results", exist_ok=True)
 
-        # Generate filename using session ID and student email
-        filename = f"exam_results/{self.session_id}_{email.replace('@', '_')}.json"
+        # Генерація унікального імені файлу
+        filename = f"exam_results/{self.session_id or datetime.now().strftime('%Y%m%d%H%M%S')}_{email.replace('@', '_')}.json"
 
-        # Write results to JSON file
+        # Збереження результатів
         try:
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(summary, f, indent=4, ensure_ascii=False)
-            logging.info(f"Exam results saved to {filename}")
+            logging.info(f"Exam results successfully saved to {filename}")
         except IOError as e:
             logging.error(f"Failed to write exam results: {e}", exc_info=True)
             return {"error": f"Failed to write exam results: {str(e)}"}
 
-        # Mark exam as completed before resetting variables
+        # Скидання змінних сесії
         self.exam_completed = True
-
-        # Reset all session-related variables
         self.examination_active = False
         self.current_email = None
         self.current_name = None
