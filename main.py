@@ -1,11 +1,11 @@
+import os
+import json
+import random
 import logging
 import gradio as gr
-import json
-from datetime import datetime
-from typing import List, Dict, Optional
-import random
 from openai import OpenAI
-import os
+from typing import List, Dict
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
