@@ -139,7 +139,7 @@ class AIExaminer:
         # If exam is completed, return a standard message
         if self.exam_completed:
             return [{
-                        "content": "The examination has been completed. The session is now closed. Please start a new session if you would like to take another examination."}]
+                "content": "The examination has been completed. The session is now closed. Please start a new session if you would like to take another examination."}]
 
         messages = [
             {
@@ -164,7 +164,7 @@ class AIExaminer:
                 - Give clear feedback after each answer
                 - Maintain examination integrity
                 - Use appropriate academic language
-                - Keep track of which question number you're on (1, 2, or 3)
+                - Keep track of which question number you're on
                 - Explicitly state when moving to the next question
                 - After the third answer and providing the score, end the session completely"""
             }
@@ -238,6 +238,7 @@ def create_interface() -> gr.Blocks:
     with gr.Blocks(theme=gr.themes.Soft()) as interface:
         gr.Markdown("# AI Examiner - NLP Course")
         gr.Markdown("Welcome to the Natural Language Processing exam!")
+        gr.Markdown("Please enter your email and full name to start the exam")
 
         chatbot = gr.Chatbot(
             show_label=False,
@@ -251,16 +252,16 @@ def create_interface() -> gr.Blocks:
             container=False
         )
 
-
         async def respond(message, chat_history):
             bot_message = examiner.process_message(message, chat_history)
             chat_history.append((message, bot_message[0]["content"]))
             return "", chat_history
 
-        msg.submit(respond, [msg, chatbot], [msg, chatbot])
+        msg.submit(respond, [msg, chatbot], [msg, chatbot], show_progress=False)
 
     return interface
 
+
 if __name__ == "__main__":
     interface = create_interface()
-    interface.launch()
+    interface.launch(share=True)
