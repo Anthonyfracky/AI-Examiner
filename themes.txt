@@ -1,30 +1,30 @@
-Що таке Natural Language Processing (NLP)?
-Які основні завдання вирішує NLP?
-У чому різниця між лемматизацією та стемінгом?
-Що таке токенізація? Для чого вона потрібна?
-Що таке стоп-слова? Наведіть приклади.
-Яка мета частиномовного аналізу (POS tagging)?
-Що таке n-грам? Як вона використовується у NLP?
-Як працює метод Bag of Words (BoW)?
-Що таке TF-IDF і для чого його застосовують?
-У чому суть Word2Vec? Які основні методи навчання цієї моделі?
-Що таке нейронна мережа Transformer?
-Як працює механізм self-attention у моделях NLP?
-Що таке Sequence-to-Sequence модель? Де вона застосовується?
-Як працюють рекурентні нейронні мережі (RNN) у контексті NLP?
-Що таке BERT, і чим він відрізняється від традиційних NLP-моделей?
-Як GPT (Generative Pre-trained Transformer) генерує текст?
-Що таке fine-tuning у контексті трансформерів?
-Як використовується embeddings у сучасних NLP-моделях?
-Як працює система автоматичного перекладу тексту?
-Що таке аналіз сентименту? Як його виконують?
-Які підходи використовуються для виявлення фейкових новин?
-Як реалізуються чат-боти з використанням NLP?
-Що таке розпізнавання сутностей (NER)?
-Як працює класифікація текстів?
-Які бібліотеки найчастіше використовуються для NLP? (наприклад, NLTK, spaCy, Hugging Face)
-У чому переваги та недоліки бібліотеки Hugging Face?
-Як працює Pipeline у бібліотеці Transformers?
-Які основні виклики стоять перед NLP у багатомовному середовищі?
-Як можна розв’язувати проблему дисбалансу даних у задачах NLP?
-Що таке zero-shot learning і як воно використовується у NLP?
+What is Natural Language Processing (NLP)?
+What are the main tasks that NLP solves?
+What is the difference between lemmatization and stemming?
+What is tokenization? What is it used for?
+What are stop words? Give examples.
+What is the goal of part-of-speech tagging (POS tagging)?
+What is an n-gram? How is it used in NLP?
+How does the Bag of Words (BoW) model work?
+What is TF-IDF and what is it used for?
+What is the essence of Word2Vec? What are the main methods for training this model?
+What is a Transformer neural network?
+How does the self-attention mechanism work in NLP models?
+What is a Sequence-to-Sequence model? Where is it applied?
+How do recurrent neural networks (RNNs) work in the context of NLP?
+What is BERT, and how does it differ from traditional NLP models?
+How does GPT (Generative Pre-trained Transformer) generate text?
+What is fine-tuning in the context of transformers?
+How are embeddings used in modern NLP models?
+How does a machine translation system work?
+What is sentiment analysis? How is it performed?
+What approaches are used to detect fake news?
+How are chatbots implemented using NLP?
+What is named entity recognition (NER)?
+How does text classification work?
+What libraries are most commonly used for NLP? (e.g., NLTK, spaCy, Hugging Face)
+What are the advantages and disadvantages of the Hugging Face library?
+How does the Pipeline work in the Transformers library?
+What are the main challenges facing NLP in a multilingual environment?
+How can the problem of data imbalance be solved in NLP tasks?
+What is zero-shot learning and how is it used in NLP?
