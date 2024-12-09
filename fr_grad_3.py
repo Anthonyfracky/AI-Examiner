@@ -8,7 +8,6 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 
@@ -43,7 +42,7 @@ class AIExaminer:
                 "type": "function",
                 "function": {
                     "name": "start_exam",
-                    "description": "Start a new examination session for a student",
+                    "description": "Start a new examination session for a student. Returns a list of questions for the session, or an error if the student not registered in list of students for this exam.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -85,6 +84,12 @@ class AIExaminer:
 
     def start_exam(self, email: str, name: str) -> List[str]:
         """Start a new examination session for a student."""
+        with open('students.txt', 'r', encoding='utf-8') as f:
+            students = [line.strip() for line in f if line.strip()]
+
+        if name not in students:
+            return [f"Student {name} not found in the students list."]
+
         self.examination_active = True
         self.exam_completed = False
         self.current_email = email
@@ -107,24 +112,20 @@ class AIExaminer:
         Returns:
             Dict: Exam session summary
         """
-        # Налаштування базового логування
         logging.basicConfig(
             filename='exam_debug.log',
             level=logging.DEBUG,
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
 
-        # Перевірка активності іспиту
         if not self.examination_active:
             logging.warning("Attempt to end non-active examination")
             return {"error": "No active examination session"}
 
-        # Перевірка відповідності email
         if email != self.current_email:
             logging.error(f"Email mismatch: {email} vs {self.current_email}")
             return {"error": "Email mismatch with current session"}
 
-        # Уніфікована функція обробки історії
         def standardize_history(raw_history):
             """
             Перетворює різні формати історії чату на уніфікований формат.
@@ -140,7 +141,6 @@ class AIExaminer:
 
             try:
                 for item in raw_history:
-                    # Обробка кортежів (характерно для Gradio)
                     if isinstance(item, tuple) and len(item) == 2:
                         user_msg, assistant_msg = item
                         standardized_history.extend([
@@ -156,9 +156,7 @@ class AIExaminer:
                             }
                         ])
 
-                    # Обробка словників
                     elif isinstance(item, dict):
-                        # Перевірка наявності контенту
                         if item.get('content'):
                             standardized_history.append({
                                 "role": item.get('role', 'unknown'),
@@ -166,7 +164,6 @@ class AIExaminer:
                                 "timestamp": current_time
                             })
 
-                    # Обробка списків словників
                     elif isinstance(item, list):
                         for subitem in item:
                             if isinstance(subitem, dict) and subitem.get('content'):
@@ -186,13 +183,11 @@ class AIExaminer:
 
             return standardized_history
 
-        # Обробка історії
         try:
             formatted_history = standardize_history(history)
 
             logging.debug(f"Processed history length: {len(formatted_history)}")
 
-            # Додавання системного запису, якщо історія порожня
             if not formatted_history:
                 logging.warning("No conversation history available")
                 formatted_history = [{
@@ -209,23 +204,19 @@ class AIExaminer:
                 "timestamp": datetime.now().isoformat()
             }]
 
-        # Формування підсумкового словника
         summary = {
             "session_id": self.session_id or datetime.now().strftime("%Y%m%d%H%M%S"),
             "student_name": self.current_name or "Unknown",
             "student_email": email,
-            "score": max(0, min(score, 10)),  # ОбмеженняScore від 0 до 10
+            "score": max(0, min(score, 10)),
             "timestamp": datetime.now().isoformat(),
             "conversation_history": formatted_history
         }
 
-        # Забезпечення існування директорії для результатів
         os.makedirs("exam_results", exist_ok=True)
 
-        # Генерація унікального імені файлу
         filename = f"exam_results/{self.session_id or datetime.now().strftime('%Y%m%d%H%M%S')}_{email.replace('@', '_')}.json"
 
-        # Збереження результатів
         try:
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(summary, f, indent=4, ensure_ascii=False)
@@ -234,7 +225,6 @@ class AIExaminer:
             logging.error(f"Failed to write exam results: {e}", exc_info=True)
             return {"error": f"Failed to write exam results: {str(e)}"}
 
-        # Скидання змінних сесії
         self.exam_completed = True
         self.examination_active = False
         self.current_email = None
@@ -249,7 +239,6 @@ class AIExaminer:
 
     def process_message(self, message, chat_history):
         """Process a new message using the OpenAI API and update chat history."""
-        # If exam is completed, return a standard message
         if self.exam_completed:
             return [{
                 "content": "The examination has been completed. The session is now closed. Please start a new session if you would like to take another examination."}]
@@ -283,17 +272,14 @@ class AIExaminer:
             }
         ]
 
-        # Add chat history
         for human_msg, assistant_msg in chat_history:
             messages.extend([
                 {"role": "user", "content": human_msg},
                 {"role": "assistant", "content": assistant_msg}
             ])
 
-        # Add current message
         messages.append({"role": "user", "content": message})
 
-        # Get response from OpenAI
         response = self.client.chat.completions.create(
             model="llama3-groq-70b-8192-tool-use-preview",
             messages=messages,
@@ -301,9 +287,7 @@ class AIExaminer:
             tool_choice="auto"
         )
 
-        # Handle tool calls if present
         if response.choices[0].message.tool_calls:
-            # First append the assistant's message that contains the tool calls
             messages.append({
                 "role": "assistant",
                 "content": response.choices[0].message.content,
@@ -330,7 +314,6 @@ class AIExaminer:
                         "content": str(result)
                     })
 
-            # Get final response after tool use
             response = self.client.chat.completions.create(
                 model="llama3-groq-70b-8192-tool-use-preview",
                 messages=messages,
@@ -338,7 +321,6 @@ class AIExaminer:
                 tool_choice="auto"
             )
 
-        # Update question tracking after processing the message
         if self.examination_active and "answer" in message.lower():
             self.answers_received += 1
 
@@ -377,4 +359,4 @@ def create_interface() -> gr.Blocks:
 
 if __name__ == "__main__":
     interface = create_interface()
-    interface.launch(share=True)
+    interface.launch()
