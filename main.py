@@ -26,16 +26,8 @@ class AIExaminer:
             api_key=os.getenv("OPENAI_API_KEY"),
             base_url="https://api.groq.com/openai/v1"
         )
-        self.conversation_history = []
-        self.examination_active = False
-        self.current_email = None
-        self.current_name = None
+        self.reset_exam_state()
         self.questions = load_questions()
-        self.current_question_index = 0
-        self.questions_for_session = []
-        self.answers_received = 0
-        self.exam_completed = False
-        self.session_id = None
 
         self.tools = [
             {
@@ -82,6 +74,19 @@ class AIExaminer:
             }
         ]
 
+    def reset_exam_state(self):
+        """Reset all exam-related state variables."""
+        self.conversation_history = []
+        self.examination_active = False
+        self.current_email = None
+        self.current_name = None
+        self.current_question_index = 0
+        self.questions_for_session = []
+        self.answers_received = 0
+        self.exam_completed = False
+        self.session_id = None
+        self.last_exam_summary = None
+
     def start_exam(self, email: str, name: str) -> List[str]:
         """Start a new examination session for a student."""
         with open('students.txt', 'r', encoding='utf-8') as f:
@@ -90,8 +95,8 @@ class AIExaminer:
         if name not in students:
             return [f"Student {name} not found in the students list."]
 
+        self.reset_exam_state()
         self.examination_active = True
-        self.exam_completed = False
         self.current_email = email
         self.current_name = name
         self.current_question_index = 0
@@ -128,13 +133,13 @@ class AIExaminer:
 
         def standardize_history(raw_history):
             """
-            Перетворює різні формати історії чату на уніфікований формат.
+            Converts different chat history formats to a unified format.
 
             Args:
-                raw_history (List[Any]): Вхідна історія чату
+                raw_history (List[Any]): Input chat history
 
             Returns:
-                List[Dict]: Стандартизована історія
+                List[Dict]: Standardized history
             """
             standardized_history = []
             current_time = datetime.now().isoformat()
@@ -227,13 +232,7 @@ class AIExaminer:
 
         self.exam_completed = True
         self.examination_active = False
-        self.current_email = None
-        self.current_name = None
-        self.current_question_index = 0
-        self.questions_for_session = []
-        self.answers_received = 0
-        self.conversation_history = []
-        self.session_id = None
+        self.last_exam_summary = summary
 
         return summary
 
@@ -241,7 +240,7 @@ class AIExaminer:
         """Process a new message using the OpenAI API and update chat history."""
         if self.exam_completed:
             return [{
-                "content": "The examination has been completed. The session is now closed. Please start a new session if you would like to take another examination."}]
+                "content": "The examination has been completed. The session is now closed. Press Take Exam Again if you would like to take another examination."}]
 
         messages = [
             {
@@ -333,7 +332,7 @@ def create_interface() -> gr.Blocks:
     with gr.Blocks(theme=gr.themes.Soft()) as interface:
         gr.Markdown("# AI Examiner - NLP Course")
         gr.Markdown("Welcome to the Natural Language Processing exam!")
-        gr.Markdown("Please enter your email and full name to start the exam")
+        gr.Markdown("Enter any message to start the examination ✍️")
 
         chatbot = gr.Chatbot(
             show_label=False,
@@ -347,15 +346,22 @@ def create_interface() -> gr.Blocks:
             container=False
         )
 
+        retake_btn = gr.Button("Take Exam Again", visible=True)
+
         async def respond(message, chat_history):
             bot_message = examiner.process_message(message, chat_history)
             chat_history.append((message, bot_message[0]["content"]))
+
             return "", chat_history
 
+        async def retake_exam():
+            examiner.reset_exam_state()
+            return "", [], gr.update(visible=True)
+
         msg.submit(respond, [msg, chatbot], [msg, chatbot], show_progress=False)
+        retake_btn.click(retake_exam, None, [msg, chatbot, retake_btn], show_progress=False)
 
     return interface
-
 
 if __name__ == "__main__":
     interface = create_interface()
