@@ -75,13 +75,6 @@ class AIExaminer:
                             "score": {
                                 "type": "number",
                                 "description": "Final score (0-10)"
-                            },
-                            "history": {
-                                "type": "array",
-                                "description": "List of conversation messages",
-                                "items": {
-                                    "type": "object"
-                                }
                             }
                         },
                         "required": ["email", "score", "history"]
@@ -329,7 +322,7 @@ class AIExaminer:
                     })
                 elif tool_call.function.name == 'end_exam':
                     args = json.loads(tool_call.function.arguments)
-                    result = self.end_exam(args['email'], args['score'], args['history'])
+                    result = self.end_exam(args['email'], args['score'], messages)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
