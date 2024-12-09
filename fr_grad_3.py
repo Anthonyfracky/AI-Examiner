@@ -25,13 +25,18 @@ class AIExaminer:
     def __init__(self):
         self.client = OpenAI(
             api_key=os.getenv("OPENAI_API_KEY"),
-            base_url="https://api.groq.com/openai/v1"  # Replace with actual Grok API URL
+            base_url="https://api.groq.com/openai/v1"
         )
         self.conversation_history = []
         self.examination_active = False
         self.current_email = None
         self.current_name = None
         self.questions = load_questions()
+        self.current_question_index = 0
+        self.questions_for_session = []
+        self.answers_received = 0
+        self.exam_completed = False
+        self.session_id = None
 
         self.tools = [
             {
@@ -88,9 +93,14 @@ class AIExaminer:
     def start_exam(self, email: str, name: str) -> List[str]:
         """Start a new examination session for a student."""
         self.examination_active = True
+        self.exam_completed = False
         self.current_email = email
         self.current_name = name
-        return random.sample(self.questions, 3)
+        self.current_question_index = 0
+        self.answers_received = 0
+        self.questions_for_session = random.sample(self.questions, 3)
+        self.session_id = datetime.now().strftime("%Y%m%d%H%M%S")
+        return self.questions_for_session
 
     def end_exam(self, email: str, score: float, history: List[dict]) -> dict:
         """End the examination session and record the results."""
@@ -101,6 +111,7 @@ class AIExaminer:
             return {"error": "Email mismatch with current session"}
 
         summary = {
+            "session_id": self.session_id,
             "student_name": self.current_name,
             "student_email": email,
             "score": score,
@@ -108,32 +119,54 @@ class AIExaminer:
             "conversation_history": history
         }
 
+        # Mark exam as completed before resetting variables
+        self.exam_completed = True
+
+        # Reset all session-related variables
         self.examination_active = False
         self.current_email = None
         self.current_name = None
+        self.current_question_index = 0
+        self.questions_for_session = []
+        self.answers_received = 0
+        self.conversation_history = []
+        self.session_id = None
 
         return summary
 
     def process_message(self, message, chat_history):
         """Process a new message using the OpenAI API and update chat history."""
-        # Convert chat history to OpenAI format
+        # If exam is completed, return a standard message
+        if self.exam_completed:
+            return [{
+                        "content": "The examination has been completed. The session is now closed. Please start a new session if you would like to take another examination."}]
+
         messages = [
             {
                 "role": "system",
                 "content": """You are an AI examiner for a Natural Language Processing course. 
-    Your role is to conduct oral examinations and evaluate students' knowledge.
+                Your role is to conduct oral examinations and evaluate students' knowledge.
 
-    Follow these guidelines:
-    1. When a student provides their email and name, use the start_exam tool to begin the examination
-    2. Ask one question at a time and wait for the student's response
-    3. Evaluate each answer thoroughly and provide feedback
-    4. After all questions are answered, calculate a final score (0-10)
-    5. Use the end_exam tool when the examination is complete
-    Remember to:
-    - Be professional and supportive
-    - Give clear feedback after each answer
-    - Maintain examination integrity
-    - Use appropriate academic language"""
+                Follow these guidelines:
+                1. When a student provides their email and name, use the start_exam tool to begin the examination
+                2. Ask one question at a time and wait for the student's response
+                3. Evaluate each answer thoroughly and provide feedback
+                4. Track the number of questions asked and answers received
+                5. After receiving the answer to the last question (third question):
+                   - Provide final feedback
+                   - Calculate the final score (0-10)
+                   - Use the end_exam tool with the calculated score
+                   - End the conversation with a farewell message
+                   DO NOT continue the conversation after using end_exam
+
+                Remember to:
+                - Be professional and supportive
+                - Give clear feedback after each answer
+                - Maintain examination integrity
+                - Use appropriate academic language
+                - Keep track of which question number you're on (1, 2, or 3)
+                - Explicitly state when moving to the next question
+                - After the third answer and providing the score, end the session completely"""
             }
         ]
 
@@ -191,7 +224,11 @@ class AIExaminer:
                 tools=self.tools,
                 tool_choice="auto"
             )
-        print(messages)
+
+        # Update question tracking after processing the message
+        if self.examination_active and "answer" in message.lower():
+            self.answers_received += 1
+
         return [{"content": response.choices[0].message.content}]
 
 
@@ -200,7 +237,7 @@ def create_interface() -> gr.Blocks:
 
     with gr.Blocks(theme=gr.themes.Soft()) as interface:
         gr.Markdown("# AI Examiner - NLP Course")
-        gr.Markdown("Вітаємо на іспиті з курсу Natural Language Processing")
+        gr.Markdown("Welcome to the Natural Language Processing exam!")
 
         chatbot = gr.Chatbot(
             show_label=False,
@@ -210,9 +247,10 @@ def create_interface() -> gr.Blocks:
 
         msg = gr.Textbox(
             show_label=False,
-            placeholder="Введіть повідомлення...",
+            placeholder="Enter your message...",
             container=False
         )
+
 
         async def respond(message, chat_history):
             bot_message = examiner.process_message(message, chat_history)
@@ -222,7 +260,6 @@ def create_interface() -> gr.Blocks:
         msg.submit(respond, [msg, chatbot], [msg, chatbot])
 
     return interface
-
 
 if __name__ == "__main__":
     interface = create_interface()
